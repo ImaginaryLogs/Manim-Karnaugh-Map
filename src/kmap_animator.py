@@ -5,12 +5,19 @@ from manim import *
 import numpy as np
 from itertools import combinations
 
-class grouped_terms:
-  def __init__(self, start_corner: tuple[int, int], end_corner: tuple[int, int], delta_coords: tuple[int, int]):
-    self.start = start_corner
-    self.final = end_corner
-    self.delta = (0, 0) if delta_coords is None else delta_coords
-
+class term_group:
+  def __init__(self, start_corner: tuple[int, int], end_corner: tuple[int, int], delta_coords: tuple[int, int] = None):
+    self.start = list(start_corner)
+    self.final = list(end_corner)
+    self.delta = list((0, 0)) if delta_coords is None else list(delta_coords)
+    self.size = 1
+    
+  def update_end_corner(self, dim, new_delta):
+    self.delta[dim] = new_delta
+    self.final[dim] = self.start[dim] + self.delta[dim] - 1
+    
+  def update_size(self):
+    self.size *= 2
 
 class tileStatus(Enum):
   INVALID = 0
@@ -54,6 +61,11 @@ def color_selector(predefined_colors):
     
     return select_color
 
+def iterate_2d(x_codomain, y_range, func):
+  for y in y_range:
+    for x in x_codomain:
+      func(x, y)
+
 def create_min_groups(matrix: list[list[int]]):
   matrix = np.array(matrix)
   
@@ -66,55 +78,61 @@ def create_min_groups(matrix: list[list[int]]):
   coord_shift = lambda x, k, shift: x % (k//2) + shift//2
   
   def is_valid(x, y):
+    nonlocal super_matrix
     return super_matrix[y][x] == 1 and 0 <= x < t_width and 0 <= y < t_length 
 
   def is_filled(matrix, top_left, bottom_right, signature = 1):
     start_row, start_col = top_left
     end_row, end_col = bottom_right
-    for x in range(start_col, end_col + 1):
-      for y in range(start_row, end_row + 1):
-        if matrix[x][y] != signature:
-            return False
+    try:
+      for x in range(start_col, end_col + 1):
+        for y in range(start_row, end_row + 1):
+          if matrix[x][y] != signature:
+              return False
+    except:
+      return False
     return True
 
 
+  add_delta = lambda dim: 2 ** dim
+  
   def find_rectangle(start_x, start_y):
-
-    max_x, max_y = start_x, start_y
-    delta_x, delta_y = 0, 0
+    rect_group = term_group((start_x, start_y), (start_x, start_y))
     is_delx_possible, is_dely_possible = tileStatus.UNEXPLORED, tileStatus.UNEXPLORED
     use_remaining = False
     
-    def satisfy(axis: int, max_x: int, max_y: int, extension_x: int, extension_y:int ):
+    def satisfy(axis: int, max_coord: tuple[int, int], extensnion_vect: tuple[int, int]):
       """Check if a given direction of a corner satisfy rules to be grouped
 
       Args:
-          axis (int): _description_
-          max_x (int): _description_
-          max_y (int): _description_
-          extension_x (int): _description_
-          extension_y (int): _description_
+          axis (int): dimension to check satisfaction
+          max_x (int): end x-dimension of the corner that fulfills 'satisfaction' requirements
+          max_y (int): end y-dimension of the corner that fulfills 'satisfaction' requirements
+          extension_x (int): width of expansion
+          extension_y (int): length of expansion
 
       Returns:
-          _type_: _description_
+          tileStatus: Enum denoting expansion status.
       """
-      g_terms = grouped_terms((start_x, start_y), (max_x, max_y), (extension_x, extension_y))
+      nonlocal start_x, start_y
+      g_terms = term_group((start_x, start_y), max_coord, extensnion_vect)
 
-      start = g_terms.start[axis]
-      delta = g_terms.delta[axis]
-      final = [max_x, max_y]
+      start = (g_terms.start)[axis]
+      delta = (g_terms.delta)[axis]
+      final = list(max_coord)
       
-      table_dim = table_size[axis] 
-      final[axis] = start + 1 if delta == 0 else start + delta * 2 + 1
+      table_dim = table_size[axis]
       
+      size = g_terms.size
+      final[axis] = start + add_delta(delta) - 1
       g_terms.final = tuple(final)
       
       if g_terms.final[axis] >= table_dim:
         return tileStatus.INVALID
       
-      unexplored = not is_filled(visited, g_terms.start, g_terms.final, True)
-      filled = is_filled(super_matrix, g_terms.start, g_terms.final)
-      limit = table_dim // 2
+      unexplored  = not is_filled(visited, g_terms.start, g_terms.final, True)
+      filled      = is_filled(super_matrix, g_terms.start, g_terms.final)
+      limit       = table_dim // 2
 
       if unexplored and filled and (delta <= limit):
           return tileStatus.UNEXPLORED
@@ -123,51 +141,68 @@ def create_min_groups(matrix: list[list[int]]):
       else:
           return tileStatus.INVALID
     
-    add_delta = lambda dim: 1 if dim == 0 else dim * 2
+    
+  
+    def check_updates(dim):
+      is_deldim_possible = satisfy(dim, rect_group.final, rect_group.delta)
+      if possible_expansion(is_deldim_possible):
+        rect_group.update_end_corner(dim, add_delta(rect_group.delta[dim]))
+      return is_deldim_possible
     
     while is_dely_possible != tileStatus.INVALID or is_delx_possible != tileStatus.INVALID:
       possible_expansion = lambda tile: tile == tileStatus.UNEXPLORED or tile == tileStatus.VISITED and use_remaining
 
-      is_delx_possible = satisfy(0, max_x, max_y, delta_x, delta_y)
-      if possible_expansion(is_delx_possible):
-        delta_x = add_delta(delta_x)
-        max_x = start_x + delta_x
-
-      is_dely_possible = satisfy(1, max_x, max_y, delta_x, delta_y)
-      if possible_expansion(is_dely_possible):
-        delta_y = add_delta(delta_y)
-        max_y = start_y + delta_y
+      is_delx_possible = check_updates(0)
+      is_dely_possible = check_updates(1)
 
       if is_dely_possible != tileStatus.UNEXPLORED and is_delx_possible != tileStatus.UNEXPLORED:
         use_remaining = True
 
-    return grouped_terms((start_x, start_y), (max_x, max_y))
+    return rect_group
+  
+  def update_visited(kx, ky):
+    nonlocal visited
+    xs = lambda shift: coord_shift(kx, t_length, shift) # xshifted
+    ys = lambda shift: coord_shift(ky, t_width, shift) # yshifted
+    
+    visited[ys(0)][xs(0)] = True
+    visited[ys(0)][xs(t_length)] = True
+    visited[ys(t_width)][xs(t_length)] = True
+    visited[ys(t_width)][xs(0)] = True
+    
+  
+  def check_matrix_cell(cell_x, cell_y):
+    if not is_valid(cell_x, cell_y):
+      return
+      
+    nonlocal t_length, t_width, min_terms
+    new_rect = find_rectangle(cell_x, cell_y)
+    (start_x, start_y), (max_x, max_y) = new_rect.start, new_rect.final
 
-  for y in range(t_width):
-    for x in range(t_length):
-      if not is_valid(x, y):
-        continue
+    submatrix = [row[new_rect.start[0]:new_rect.final[0] + 1] for row in visited[new_rect.start[1]:new_rect.final[1] + 1]]
+    
+    if not any(not all(row) for row in submatrix):
+      return
+    
+    # Mark cells as visited
+    iterate_2d(range(start_x, max_x + 1), range(start_y, max_y + 1), update_visited)
+    coords = lambda shift_x, shift_y: [\
+      (start_x - t_length// 4 + shift_x, start_y - t_width//4 + shift_y), \
+      (max_x - t_length// 4 + shift_x, max_y - t_width//4 + shift_y)
+      ]
+    min_terms.append([coords(0, 0), 
+                      coords(t_length//2, 0), 
+                      coords(0, t_width//2), 
+                      coords(t_length//2, t_width//2),
+                      coords(-t_length//2, t_width//2),
+                      coords(0, -t_width//2), 
+                      coords(t_length//2, -t_width//2),
+                      coords(-t_length//2, 0), 
+                      ])
+  
+  
+  iterate_2d(range(t_length), range(t_width), check_matrix_cell)
       
-      new_rect = find_rectangle(x, y)
-      (start_x, start_y, max_x, max_y) = new_rect.start, new_rect.final
-
-      submatrix = [row[new_rect[0]:new_rect[2] + 1] for row in visited[new_rect[1]:new_rect[3] + 1]]
-      
-      if not any(not all(row) for row in submatrix):
-        continue
-      
-      # Mark cells as visited
-      for ky in range(start_y, max_y + 1):
-        for kx in range(start_x, max_x + 1):
-          xs = lambda shift: coord_shift(kx, t_length, shift) # xshifted
-          ys = lambda shift: coord_shift(ky, t_width, shift) # yshifted
-          
-          visited[ys(0)][xs(t_length)] = True
-          visited[ys(t_width)][xs(0)] = True
-          visited[ys(t_width)][xs(t_length)] = True
-          visited[ys(0)][xs(0)] = True
-      coords = lambda shift_x, shift_y: [(start_x - t_length// 4 + shift_x, start_y - t_width//4 + shift_y), (max_x - t_length// 4 + shift_x, max_y - t_width//4 + shift_y)]
-      min_terms.append([coords(0, 0), coords(t_length//2, 0), coords(0, t_width//2), coords(t_length//2, t_width//2)])
 
 
   return min_terms
