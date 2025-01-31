@@ -1,7 +1,9 @@
 # K Map Solver
 from enum import Enum
 import random
+import re
 from manim import *
+from pyeda.inter import *
 import numpy as np
 from itertools import combinations
 
@@ -121,7 +123,7 @@ def create_min_groups(matrix: list[list[int]]):
       delta = (g_terms.delta)[axis]
       final = list(max_coord)
       
-      table_dim = table_size[axis]
+      table_dim = table_size[1-axis]
       
       size = g_terms.size
       final[axis] = start + add_delta(delta) - 1
@@ -134,15 +136,16 @@ def create_min_groups(matrix: list[list[int]]):
       filled      = is_filled(super_matrix, g_terms.start, g_terms.final)
       limit       = table_dim // 2
 
-      if unexplored and filled and (delta <= limit):
+      if unexplored and filled and (delta < limit):
           return tileStatus.UNEXPLORED
-      elif filled and (delta <= limit):
+      elif filled and (delta < limit):
           return tileStatus.VISITED
       else:
           return tileStatus.INVALID
     
     
-  
+    possible_expansion = lambda tile: tile == tileStatus.UNEXPLORED or tile == tileStatus.VISITED and use_remaining
+    
     def check_updates(dim):
       is_deldim_possible = satisfy(dim, rect_group.final, rect_group.delta)
       if possible_expansion(is_deldim_possible):
@@ -150,7 +153,7 @@ def create_min_groups(matrix: list[list[int]]):
       return is_deldim_possible
     
     while is_dely_possible != tileStatus.INVALID or is_delx_possible != tileStatus.INVALID:
-      possible_expansion = lambda tile: tile == tileStatus.UNEXPLORED or tile == tileStatus.VISITED and use_remaining
+      
 
       is_delx_possible = check_updates(0)
       is_dely_possible = check_updates(1)
@@ -200,9 +203,57 @@ def create_min_groups(matrix: list[list[int]]):
                       coords(-t_length//2, 0), 
                       ])
   
-  
   iterate_2d(range(t_length), range(t_width), check_matrix_cell)
       
-
-
   return min_terms
+
+def graycode_gen(n: int):
+    """Generate Gray code ordering for n bits."""
+    result = [i ^ (i >> 1) for i in range(2**n)]
+    return result
+
+def truth_table_to_kmap(f_in):
+    # Size can be odd like for a 3 table.
+    f = espresso_exprs(f_in.simplify().to_dnf())[0]
+    simplified_input = str(f)[3:][:-1]
+    comma_regex = r',\s*(?![^()]*\))'
+    simplified_input = re.split(comma_regex, simplified_input)
+    simplified_input
+
+    simplified_input  
+
+    truth_table = expr2truthtable(f)
+    num_vars = len(truth_table.support)
+    half_vars = num_vars // 2
+    num_rows = 2**half_vars
+    num_cols = 2**(num_vars - half_vars)
+    
+    row_graycode, col_graycode = graycode_gen(half_vars), graycode_gen(num_vars - half_vars)
+    
+    kmap = np.zeros((num_rows, num_cols), dtype=int)
+    
+    row_vars = list(truth_table.support)[:half_vars]
+    col_vars = list(truth_table.support)[half_vars:]
+
+    for position, value in truth_table.iter_relation():
+
+      row, col = 0, 0
+      position = tuple(position.values())
+
+      match len(position):
+        case 4:
+          row = position[:half_vars][0] * 2 + position[1]
+          col = position[half_vars:][0] * 2 + position[3]
+        case 3:
+          row = position[:half_vars][0]
+          col = position[half_vars:][0] * 2 + position[half_vars:][1]
+        case 2:
+          row = position[:half_vars][0] 
+          col = position[half_vars:][0] 
+        case 1:
+          row = 0
+          col = position[half_vars:][0] 
+      row_index = row_graycode[row]
+      col_index = col_graycode[col]
+      kmap[row_index, col_index] = value
+    return ((row_vars, col_vars), kmap)
